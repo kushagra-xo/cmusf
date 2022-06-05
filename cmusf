@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+
+#------------------------------------------------------------------------------
+
+# Path         - ~/.local/bin/cmusf
+# Author       - Kushagra
+# Modified On  - Mon May 30 11:45:15 AM IST 2022
+
+#------------------------------------------------------------------------------
+
+error() {
+
+        local mesg=$1; shift
+        printf "${RED}==> ERROR:${ALL_OFF} %s${ALL_OFF}\n" "$mesg" "$@" >&2
+
+}
+
+initialisation() {
+	
+	SCRIPTNAME=$(basename $0)
+	PIDFILE=~/.local/${SCRIPTNAME}.pid
+
+	if [ -f ${PIDFILE} ]; then
+		OLDPID=$(cat ${PIDFILE})
+		RESULT=$(ps -ef | grep ${OLDPID} | grep ${SCRIPTNAME})
+
+	        if [ -n "${RESULT}" ]; then
+		         error "Cannot run multiple instances"
+		         exit 0
+	        fi
+
+	fi
+
+	PID=$(ps -ef | grep ${SCRIPTNAME} | head -n1 |  awk ' {print $2;} ')
+	echo ${PID} > ${PIDFILE}
+	
+	if [[ ! $(pgrep cmus) ]]; then  
+		echo ""
+		error "cmus is not running"
+		echo ""
+		exit 0
+	fi
+
+	if [[ -d /tmp/art ]]; then
+		     rm -r /tmp/art/
+		     mkdir /tmp/art/
+		  else
+		     mkdir /tmp/art/
+	fi
+
+	echo -e "\n\n:::  CMUS FETCH  :::\n\n"
+
+}
+
+checkup() {
+
+	STATUS="$(cmus-remote -Q | grep status | cut -f 2 -d ' ')"    
+	if [[ $STATUS == stopped ]]; then 
+		echo ""
+		error "no music file being played"
+		echo ""
+	fi
+
+	while [[ $STATUS == stopped ]];
+	do
+		STATUS="$(cmus-remote -Q | grep status | cut -f 2 -d ' ')"
+		echo -e "Waiting for cmus to start..." "( $(date) )"
+		sleep 1
+	done
+
+}
+
+utilities() {
+
+	TERMINAL=$(echo $TERM | cut -f 1 -d '-')
+
+	bash -c "exec -a cmus_cava $TERMINAL -e cava 2> /dev/null & sleep 0.1 &"
+	bash -c "exec -a cmus_lyrics $TERMINAL -e lyrics 2> /dev/null &"
+
+}
+
+art() {
+
+	FILE=$(cmus-remote -Q | grep file | sed -e 's/file //g')
+
+	ffmpeg -y -i "$FILE" /tmp/art/art.jpeg &> /dev/null
+	bash -c "exec -a cmus_art feh -Z --scale-down --image-bg black /tmp/art/art.jpeg &> /dev/null &"
+
+	echo "INITIALISATION FILE:" $FILE 
+	echo ""
+
+	while [[ $(pgrep cmus) ]]; do
+
+		echo -e "\n:LOOP STARTED:\n"
+
+		fileOLD="$(cmus-remote -Q | grep "file" | sed "s/file //")"
+		echo 1. $fileOLD
+
+		sleep 4
+
+		fileNOW="$(cmus-remote -Q | grep "file" | sed "s/file //")"
+		echo 2. $fileNOW
+
+		if [[ "$fileNOW" != "$fileOLD" ]]; then
+			echo -e "\n==> DIFFERENCE DETECTED!\n"
+			ffmpeg -y -i "$fileNOW" /tmp/art/art.jpeg &> /dev/null
+		fi
+
+	done
+
+}
+
+cleanup() {
+
+	kill $(pidof -x "cmus_cava")
+	kill $(pidof -x "cmus_lyrics")
+	kill $(pidof -x "cmus_art")
+	rm -r /tmp/art/art.jpeg
+	rm -r $PIDFILE
+
+}
+
+main() {
+
+	initialisation
+	checkup
+	utilities
+	art
+	cleanup
+
+}
+
+main
